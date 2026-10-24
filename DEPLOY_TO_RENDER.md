@@ -23,7 +23,7 @@ This repository is pre-configured for 1-click or repository deployment on **[Ren
 1. On the Render Dashboard, click **New +** > **Web Service**.
 2. Connect your GitHub repository.
 3. Configure the settings:
-   - **Name**: `a4ku-badge-farmer`
+   - **Name**: `unq-badge` (this assigns your URL: `unq-badge.onrender.com`)
    - **Language**: `Python 3`
    - **Region**: `Oregon (US West)` or your preferred region
    - **Branch**: `main`
