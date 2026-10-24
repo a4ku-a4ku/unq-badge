@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: a4ku-badge-farmer
+    name: unq-badge
     env: python
     region: oregon
     plan: free
