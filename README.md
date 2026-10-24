@@ -1,0 +1,76 @@
+# discord-badge-spoofer
+
+inflates your discord profile badges - add hours played and mark games as played.
+
+## join https://discord.gg/solasity for support
+## use https://badge.revere.no/ to view your badges
+
+**how it works:** discord's analytics endpoint (`/api/v9/science`) tracks what games you play and how long you play them. this tool posts the same events the real client does (`launch_game` and `running_game_heartbeat`), but with custom hours and game lists. discord accepts the events (`204`) and they do show up in your badges.
+
+**status:** verified working and currently unpatched. badges take 1-2 days to update, so don't expect results right away. your token and cookie are stored locally only - nothing leaves your machine. this may break at any time if discord patches the endpoint.
+
+**important:** this violates discord's tos. use it on accounts you're comfortable losing.
+
+## setup & usage
+
+### Option A: 12-Slot Automated Web Dashboard (Recommended)
+The web app is located in its own [`web/`](file:///c:/Users/vive1/Documents/discord-badge-spoofer-main/web/) directory.
+
+1. Double-click [start_web.bat](file:///c:/Users/vive1/Documents/discord-badge-spoofer-main/start_web.bat) or run:
+   ```bash
+   cd web
+   python server.py
+   ```
+2. Automatically opens **http://localhost:5000** in your browser.
+3. **Features**:
+   - **Up to 12 Accounts simultaneously loaded**: Manage Slots #01 to #12.
+   - **Only 2 inputs to type per account**:
+     - `1st:` Discord Account Token
+     - `2nd:` Cloudflare `cf_clearance` Cookie
+   - **Zero Customization / Automatic 7K Games**: Automatically farms up to the 7,000 games maximum limit with optimal heartbeats.
+   - **Auto Profile Preview**: Real-time avatar, display name, and Discord ID preview as soon as you paste a token.
+   - **Bulk Import**: Paste multiple `TOKEN:COOKIE` pairs at once to fill all 12 slots in one click.
+
+### Option B: Terminal CLI
+Run:
+```bash
+python spoofer.py
+```
+
+5. **optional: fingerprint for games-played count.** the fingerprint isn't strictly necessary - users have reported getting the games-played badge without setting one. if you want to set it, grab a real `executable_fingerprint` from a `launch_game` request in your client's devtools and add it to `science_state.json` as `"fingerprint": "..."`.
+
+## menu
+
+- `1` claim playtime - asks for hours per game, applies to every game
+- `2` games played - marks every game as played (1 minute each)
+- `3` refresh auth - pulls a fresh analytics token and lets you update the cookie
+- `4` exit
+
+## how auth works
+
+- `token` - your account token, entered on first run, saved to `science_state.json`
+- `analytics_token` - fetched from `GET /users/@me?with_analytics_token=true`
+- `super_props` / heartbeat / launch ids - generated automatically
+- `cookie` (cf_clearance) - pasted by hand, via option `3`
+- `fingerprint` - optional, only needed for the games-played count (see below)
+
+badges update on discord's analytics cycle (1-2 days), so don't expect to see results right away.
+
+## about the fingerprint
+
+hours work with just your token and cookie. the games-played count might need a real `executable_fingerprint` - we're not 100% sure yet. users have reported getting badges without one, so try it first. if it doesn't work after a few days, grab a real `executable_fingerprint` from a `launch_game` request in your client's devtools and add it to `science_state.json`:
+
+```json
+{ "fingerprint": "Ab5ekw..." }
+```
+
+either way, the tool will post the events - we just want feedback on whether the badges move with or without the fingerprint so we can figure out what's actually required.
+
+## disclaimer
+
+this breaks discord's terms of service. use it on accounts you're fine losing.
+provided as-is with no warranty.
+
+## license
+
+released under the mit license. see [LICENSE](LICENSE).

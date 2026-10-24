@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>A4KU // Discord Badge Auto-Completer</title>
+  <meta name="description" content="Minimalist monochrome Discord 7K Badge auto-completer web engine with 12-slot queue management. Dev by A4KU.">
+  <link rel="stylesheet" href="/static/css/style.css">
+  <link rel="icon" type="image/png" href="/static/favicon.png">
+</head>
+<body>
+  <div id="cursor-glow" class="cursor-glow" aria-hidden="true"></div>
+  <div class="app-wrapper">
+    <!-- Header -->
+    <header class="a4ku-header">
+      <div class="header-container">
+        <a href="/" class="brand-badge">
+          <img src="/static/logo.png" alt="A4KU Logo" class="brand-logo-img">
+          <div>
+            <div class="brand-title">A4KU // BADGE SYSTEM</div>
+          </div>
+          <span class="brand-tag">v2.0 PRO</span>
+        </a>
+
+        <div class="header-actions">
+          <!-- 1k+ Trusted Users Badge -->
+          <div class="trusted-users-badge" title="Over 1,000+ Verified & Active Discord Users">
+            <span class="trusted-pulse-dot"></span>
+            <span><strong>1k+</strong> TRUSTED USERS</span>
+          </div>
+
+          <!-- Blue Discord Community Link -->
+          <a href="https://discord.gg/unq" target="_blank" rel="noopener noreferrer" class="btn-discord-glow" title="Join our Discord">
+            <span>discord.gg/unq</span>
+          </a>
+
+          <!-- Slots Status Pill -->
+          <div class="server-status-pill" id="global-status-pill" title="Click to view 12-Slot Pool Status">
+            <span class="pulse-dot"></span>
+            <span id="slots-text">SLOTS: 0/12 ACTIVE</span>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="main-content">
+      
+      <!-- ====================================================================
+           VIEW 1: CENTERED TOKEN & COOKIE INPUT
+           ==================================================================== -->
+      <section class="center-card-view" id="view-input">
+        <div class="hero-box">
+          <div class="hero-logo-wrapper">
+            <img src="/static/logo.png" alt="A4KU Icon" class="hero-logo-img">
+          </div>
+          <h1 class="hero-title">A4KU Badge Auto-Completer</h1>
+          <p class="hero-subtitle">
+            Paste your Discord account token and cookie below to automatically spoof and unlock 7,000 games & playtime badges.
+          </p>
+
+          <form id="token-form" class="input-container" onsubmit="return false;">
+            <div class="input-wrapper">
+              <input 
+                type="password" 
+                id="token-input" 
+                class="token-input" 
+                placeholder="1st: Discord User Token..." 
+                autocomplete="off"
+                spellcheck="false"
+                required
+              >
+              <button type="button" id="toggle-token-btn" class="toggle-visibility-btn" title="Toggle visibility">
+                👁️
+              </button>
+            </div>
+
+            <div class="input-wrapper">
+              <input 
+                type="text" 
+                id="cookie-input" 
+                class="token-input" 
+                placeholder="2nd: Cloudflare Clearance Cookie (cf_clearance)..." 
+                autocomplete="off"
+                spellcheck="false"
+                required
+              >
+            </div>
+
+            <button type="submit" id="start-btn" class="primary-btn">
+              <span>INITIALIZE 7K BADGES</span>
+              <span>→</span>
+            </button>
+
+            <div id="error-box" class="error-banner"></div>
+
+            <div class="input-helper-text">
+              <span>🔒 Client-orchestrated serverless execution. Tokens are never stored.</span>
+            </div>
+          </form>
+        </div>
+      </section>
+
+      <!-- ====================================================================
+           VIEW 2: QUEUE WAITING SCREEN
+           ==================================================================== -->
+      <section class="queue-view" id="view-queue">
+        <div class="queue-card">
+          <div class="radar-spinner"></div>
+          <div class="queue-badge">SYSTEM BUSY // QUEUE ACTIVE</div>
+          <div class="queue-position-display" id="queue-position-text">#1</div>
+          <p class="queue-msg">
+            All 12 active farming slots are currently occupied.<br>
+            <strong>Keep this browser tab open.</strong> Your session will automatically start the moment a slot frees up.
+          </p>
+          <button type="button" id="leave-queue-btn" class="leave-queue-btn">
+            CANCEL & LEAVE QUEUE
+          </button>
+        </div>
+      </section>
+
+      <!-- ====================================================================
+           VIEW 3: ACTIVE BADGE FARMING DASHBOARD
+           ==================================================================== -->
+      <section class="dashboard-view" id="view-dashboard">
+        
+        <!-- User profile header -->
+        <div class="user-profile-bar">
+          <div class="user-identity">
+            <img id="user-avatar" src="" alt="Avatar" class="user-avatar-img" onerror="this.src='https://cdn.discordapp.com/embed/avatars/0.png'">
+            <div class="user-name-wrapper">
+              <div class="user-display-name" id="user-display-name">Username</div>
+              <div class="user-tag" id="user-tag">@username</div>
+            </div>
+          </div>
+
+          <div class="session-stats-group">
+            <div class="server-status-pill">
+              <span class="pulse-dot"></span>
+              <span id="session-timer">00:00</span>
+            </div>
+            <button type="button" id="abort-session-btn" class="abort-btn">ABORT</button>
+          </div>
+        </div>
+
+        <!-- Metric Cards -->
+        <div class="stats-banner">
+          <div class="stat-card">
+            <div class="stat-label">Target Games</div>
+            <div class="stat-value" id="stat-target">7,000</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">Games Spoofed</div>
+            <div class="stat-value" id="stat-completed">0 / 7,000</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">Active Worker Status</div>
+            <div class="stat-value" id="stat-status">Farming...</div>
+          </div>
+        </div>
+
+        <!-- Badges Pipeline Grid -->
+        <div class="quest-list-header">
+          <h2 class="section-title">Active Badges Pipeline</h2>
+        </div>
+
+        <div class="quests-grid" id="quests-container">
+          <!-- Rendered dynamically by app.js -->
+        </div>
+
+        <!-- Minimalist Terminal Log -->
+        <div class="terminal-box">
+          <div class="terminal-header">
+            <span>A4KU // CONSOLE LOGS</span>
+            <span id="log-count">0 events</span>
+          </div>
+          <div class="terminal-logs" id="terminal-logs">
+            <div class="log-entry">Waiting for worker initialization...</div>
+          </div>
+        </div>
+
+      </section>
+
+      <!-- ====================================================================
+           VIEW 4: VICTORY & REWARD SCREEN
+           ==================================================================== -->
+      <section class="victory-view" id="view-victory">
+        <div class="victory-card">
+          <div class="victory-icon">🏆</div>
+          <h2 class="victory-title">7,000 Games & Playtime Spoofed</h2>
+          <p class="victory-subtitle" id="victory-summary-text">
+            Telemetry successfully submitted. Please allow <strong>24–48 hours</strong> for Discord's servers to automatically process and display your badges on your profile.
+          </p>
+
+          <div class="rewards-instruction-box">
+            <div class="instruction-step">
+              <div class="step-number" style="background:#22c55e;color:#000;">✓</div>
+              <div><strong>7,000 Games & Hours Submitted:</strong> All telemetry events have been successfully received and validated by Discord's Science backend.</div>
+            </div>
+            <div class="instruction-step">
+              <div class="step-number">⏳</div>
+              <div><strong>Wait 24–48 Hours:</strong> Discord indexes game history and playtime metrics in scheduled global batches. It typically takes <strong>24 to 48 hours</strong> to reflect.</div>
+            </div>
+            <div class="instruction-step">
+              <div class="step-number">🛡️</div>
+              <div><strong>Automatic Profile Update:</strong> No manual claim is required. Your badges will automatically appear on your Discord profile once Discord's indexing cycle completes.</div>
+            </div>
+          </div>
+
+          <button type="button" id="restart-btn" class="primary-btn" style="width: 100%;">
+            FARM ANOTHER ACCOUNT
+          </button>
+        </div>
+      </section>
+
+    </main>
+
+    <!-- Slots Overview Modal (opens on clicking header slots pill) -->
+    <div class="slots-modal-backdrop" id="slots-modal">
+      <div class="slots-modal">
+        <div class="slots-modal-header">
+          <div class="slots-modal-title">12-Slot Concurrent Engine Pool</div>
+          <button type="button" class="slots-modal-close" id="slots-modal-close">&times;</button>
+        </div>
+        <div class="slots-modal-body" id="slots-modal-grid">
+          <!-- 12 slot mini cards rendered dynamically -->
+        </div>
+      </div>
+    </div>
+
+    <!-- Footer -->
+    <footer class="a4ku-footer">
+      <div>A4KU BADGE ENGINE • DEV BY A4KU • 12-SLOT CONCURRENT POOL</div>
+    </footer>
+  </div>
+
+  <script src="/static/js/app.js"></script>
+</body>
+</html>

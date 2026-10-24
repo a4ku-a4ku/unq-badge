@@ -1,0 +1,14 @@
+services:
+  - type: web
+    name: a4ku-badge-farmer
+    env: python
+    region: oregon
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn --chdir web -w 1 --threads 16 -b 0.0.0.0:$PORT server:app
+    autoDeploy: true
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.9
+      - key: HOST
+        value: 0.0.0.0
