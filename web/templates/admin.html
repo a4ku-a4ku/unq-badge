@@ -256,10 +256,10 @@
             <label class="field-label">Allowed Times Usable</label>
             <input type="number" id="modal-edit-uses-input" class="admin-input-sm" min="1" max="999999" value="1">
             <div class="uses-preset-row" style="margin-top: 8px;">
-              <button type="button" class="preset-use-btn" onclick="document.getElementById('modal-edit-uses-input').value = '1'">1 Use</button>
-              <button type="button" class="preset-use-btn" onclick="document.getElementById('modal-edit-uses-input').value = '5'">5 Uses</button>
-              <button type="button" class="preset-use-btn" onclick="document.getElementById('modal-edit-uses-input').value = '10'">10 Uses</button>
-              <button type="button" class="preset-use-btn" onclick="document.getElementById('modal-edit-uses-input').value = '999999'">Unlimited (∞)</button>
+              <button type="button" class="preset-use-btn" data-val="1" onclick="document.getElementById('modal-edit-uses-input').value = '1'">1 Use</button>
+              <button type="button" class="preset-use-btn" data-val="5" onclick="document.getElementById('modal-edit-uses-input').value = '5'">5 Uses</button>
+              <button type="button" class="preset-use-btn" data-val="10" onclick="document.getElementById('modal-edit-uses-input').value = '10'">10 Uses</button>
+              <button type="button" class="preset-use-btn" data-val="999999" onclick="document.getElementById('modal-edit-uses-input').value = '999999'">Unlimited (∞)</button>
             </div>
           </div>
           <div style="display: flex; gap: 10px; justify-content: flex-end; margin-top: 8px;">

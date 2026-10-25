@@ -210,8 +210,10 @@ async function fetchGlobalStatus() {
 }
 
 // ── Form Submission ─────────────────────────────────────────────────────────
-async function handleInitialize() {
-  const token = tokenInput.value.trim();
+async function handleInitialize(e) {
+  if (e && e.preventDefault) e.preventDefault();
+  if (startBtn && startBtn.disabled) return;
+  const token = tokenInput ? tokenInput.value.trim() : "";
   const cookie = cookieInput.value.trim();
   const key = keyInput ? keyInput.value.trim().toUpperCase() : "";
 
@@ -389,7 +391,8 @@ async function pollSession() {
 }
 
 // ── Abort / Cancel ──────────────────────────────────────────────────────────
-async function handleAbort() {
+async function handleAbort(e) {
+  if (e && e.preventDefault) e.preventDefault();
   stopPolling();
   stopTimer();
 

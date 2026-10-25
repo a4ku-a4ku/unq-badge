@@ -96,7 +96,8 @@
   }
 
   // ── Login Flow ──────────────────────────────────────────────────────────────
-  async function handleLogin() {
+  async function handleLogin(e) {
+    if (e && e.preventDefault) e.preventDefault();
     const password = adminPasswordInput ? adminPasswordInput.value.trim() : "";
     if (adminLoginError) adminLoginError.textContent = "";
 
@@ -452,6 +453,8 @@
     } catch (e) {
       showToast("Error communicating with server.", true);
     }
+  };
+
   window.adminOpenEditUses = function (keyStr, currentMaxUses) {
     currentEditingKey = keyStr;
     if (modalEditKeyCode) modalEditKeyCode.textContent = keyStr;
@@ -488,7 +491,8 @@
   };
 
   // ── Key Generation Form ─────────────────────────────────────────────────────
-  async function handleKeyGeneration() {
+  async function handleKeyGeneration(e) {
+    if (e && e.preventDefault) e.preventDefault();
     const count = parseInt(genCountSelect ? genCountSelect.value : 1, 10) || 1;
     const maxUses = parseInt(genUsesInput ? genUsesInput.value : 1, 10) || 1;
     const note = genNoteInput ? genNoteInput.value.trim() : "";
@@ -575,6 +579,7 @@
 
     // Key Gen Form
     if (keyGenForm) keyGenForm.addEventListener("submit", handleKeyGeneration);
+    if (genSubmitBtn) genSubmitBtn.addEventListener("click", handleKeyGeneration);
 
     // Refresh button
     if (refreshOverviewBtn) refreshOverviewBtn.addEventListener("click", () => {
@@ -600,16 +605,20 @@
       });
     });
 
-    // Preset buttons in Key Generator Form
+    // Preset buttons in Key Generator Form & Modal
     const presetBtns = document.querySelectorAll(".uses-preset-row .preset-use-btn");
     presetBtns.forEach(btn => {
-      btn.addEventListener("click", () => {
+      btn.addEventListener("click", (e) => {
+        if (e && e.preventDefault) e.preventDefault();
         const val = btn.getAttribute("data-val");
         const parentRow = btn.closest(".uses-preset-row");
-        if (val && parentRow && parentRow.previousElementSibling) {
-          parentRow.previousElementSibling.value = val;
-          parentRow.querySelectorAll(".preset-use-btn").forEach(b => b.classList.remove("active"));
-          btn.classList.add("active");
+        if (val && parentRow) {
+          const input = parentRow.parentElement ? parentRow.parentElement.querySelector("input") : null;
+          if (input) {
+            input.value = val;
+            parentRow.querySelectorAll(".preset-use-btn").forEach(b => b.classList.remove("active"));
+            btn.classList.add("active");
+          }
         }
       });
     });
