@@ -776,6 +776,19 @@ class QueueManager:
             if session_id in self.completed_sessions:
                 self.completed_sessions.pop(session_id, None)
 
+            # Reconnection Safeguard: If this Discord token is ALREADY actively farming in a slot, seamlessly reconnect!
+            for slot_obj in self.slot_manager.slots.values():
+                if slot_obj.status == "running" and slot_obj.token == token:
+                    self.active_sessions[session_id] = slot_obj.slot_id
+                    return {"status": "active", "position": 0, "slot": slot_obj.to_dict()}
+
+            # Reconnection Safeguard: If this Discord token already finished its 7,000 games run:
+            token_h = hashlib.sha256(token.encode("utf-8")).hexdigest()
+            for s_id, comp in list(self.completed_sessions.items()):
+                if comp.get("token_hash") == token_h:
+                    self.completed_sessions[session_id] = comp
+                    return {"status": "completed", "position": 0, "slot": comp}
+
             # First: Validate access key before doing any work
             key_clean = key.strip().upper()
             if not key_clean:
@@ -815,6 +828,14 @@ class QueueManager:
             if session_id in self.active_sessions:
                 slot_id = self.active_sessions[session_id]
                 slot = self.slot_manager.slots[slot_id]
+                if slot.status == "finished":
+                    return {
+                        "status": "completed",
+                        "position": 0,
+                        "slot": slot.to_dict(),
+                        "activeCount": self._active_count(),
+                        "maxSlots": MAX_SLOTS
+                    }
                 return {
                     "status": "active",
                     "position": 0,
@@ -865,6 +886,7 @@ class QueueManager:
     def record_completed_session(self, slot: AccountSlot):
         with self.lock:
             matched_sess = [s_id for s_id, s_num in self.active_sessions.items() if s_num == slot.slot_id]
+            token_h = hashlib.sha256(slot.token.encode("utf-8")).hexdigest() if slot.token else ""
             for s_id in matched_sess:
                 self.completed_sessions[s_id] = {
                     "slot_id": slot.slot_id,
@@ -873,7 +895,8 @@ class QueueManager:
                     "total_games": slot.total_games,
                     "status": "finished",
                     "finished_at": time.time(),
-                    "last_log": slot.last_log
+                    "last_log": slot.last_log,
+                    "token_hash": token_h
                 }
 
     def abort(self, session_id: str):
