@@ -414,9 +414,16 @@ async function handleAbort(e) {
 }
 
 // ── Slots Modal (Pool Inspector) ────────────────────────────────────────────
-async function openSlotsModal() {
-  if (!slotsModal) return;
-  slotsModal.style.display = "flex";
+let modalPollInterval = null;
+
+async function refreshSlotsModalData() {
+  if (!slotsModal || slotsModal.style.display !== "flex") {
+    if (modalPollInterval) {
+      clearInterval(modalPollInterval);
+      modalPollInterval = null;
+    }
+    return;
+  }
   try {
     const res = await fetch("/api/slots");
     if (!res.ok) return;
@@ -440,8 +447,20 @@ async function openSlotsModal() {
   } catch (e) {}
 }
 
+async function openSlotsModal() {
+  if (!slotsModal) return;
+  slotsModal.style.display = "flex";
+  await refreshSlotsModalData();
+  if (modalPollInterval) clearInterval(modalPollInterval);
+  modalPollInterval = setInterval(refreshSlotsModalData, 2000);
+}
+
 function closeSlotsModal() {
   if (slotsModal) slotsModal.style.display = "none";
+  if (modalPollInterval) {
+    clearInterval(modalPollInterval);
+    modalPollInterval = null;
+  }
 }
 
 // ── Smooth Cursor Follower & Lighting Effect ────────────────────────────────
@@ -529,7 +548,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // Initial Status Check
   fetchGlobalStatus();
-  statusInterval = setInterval(fetchGlobalStatus, 5000);
+  statusInterval = setInterval(fetchGlobalStatus, 2500);
 
   // Poll existing session if any
   pollSession();

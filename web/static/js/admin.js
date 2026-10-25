@@ -201,7 +201,7 @@
 
   function startAutoPoll() {
     stopAutoPoll();
-    pollTimer = setInterval(loadOverview, 5000);
+    pollTimer = setInterval(loadOverview, 2500);
   }
 
   function stopAutoPoll() {
