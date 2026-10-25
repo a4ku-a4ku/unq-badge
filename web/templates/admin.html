@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>A4KU // Admin Control Gateway & Key System</title>
+  <meta name="description" content="A4KU Discord 7K Badge Engine - Administrator Control Gateway and License Key Tracking Center.">
+  <link rel="stylesheet" href="/static/css/style.css">
+  <link rel="icon" type="image/png" href="/static/favicon.png">
+</head>
+<body class="admin-body">
+  <div id="cursor-glow" class="cursor-glow" aria-hidden="true"></div>
+
+  <!-- Toast Container -->
+  <div id="admin-toast" class="admin-toast" aria-hidden="true"></div>
+
+  <div class="app-wrapper">
+    <!-- Header -->
+    <header class="a4ku-header">
+      <div class="header-container">
+        <a href="/admin" class="brand-badge">
+          <img src="/static/logo.png" alt="A4KU Logo" class="brand-logo-img">
+          <div>
+            <div class="brand-title">A4KU // ADMIN CORE</div>
+          </div>
+          <span class="brand-tag admin-tag">SECURITY ROOT</span>
+        </a>
+
+        <div class="header-actions">
+          <div class="server-status-pill" id="admin-status-indicator">
+            <span class="pulse-dot"></span>
+            <span id="admin-status-text">SYSTEM SECURE</span>
+          </div>
+
+          <a href="/" target="_blank" rel="noopener noreferrer" class="btn-discord-glow" style="background:#27272a; border: 1px solid var(--border-strong);" title="Open Public Farming Engine">
+            <span>PUBLIC ENGINE ↗</span>
+          </a>
+
+          <button type="button" id="admin-logout-btn" class="abort-btn" style="display: none; padding: 6px 14px; font-size: 11px;">
+            LOGOUT
+          </button>
+        </div>
+      </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="main-content">
+
+      <!-- ====================================================================
+           VIEW 1: ADMIN MASTER KEY AUTHENTICATION GATEWAY
+           ==================================================================== -->
+      <section class="center-card-view" id="admin-view-login">
+        <div class="hero-box admin-login-card">
+          <div class="admin-shield-icon">🛡️</div>
+          <h1 class="hero-title" style="font-size: 26px;">Admin Control Gateway</h1>
+          <p class="hero-subtitle">
+            Enter the Master Security Key to manage access licenses, view key usage tracking, and monitor the 12-slot engine pool.
+          </p>
+
+          <form id="admin-login-form" class="input-container" onsubmit="return false;">
+            <div class="input-wrapper">
+              <input 
+                type="password" 
+                id="admin-password-input" 
+                class="token-input" 
+                placeholder="Paste Master Security Key..." 
+                autocomplete="off"
+                spellcheck="false"
+                required
+              >
+              <button type="button" id="toggle-admin-pass-btn" class="toggle-visibility-btn" title="Toggle visibility">
+                👁️
+              </button>
+            </div>
+
+            <button type="submit" id="admin-login-submit-btn" class="primary-btn">
+              <span>AUTHENTICATE GATEWAY</span>
+              <span>→</span>
+            </button>
+
+            <div id="admin-login-error" class="error-banner"></div>
+
+            <div class="input-helper-text">
+              <span>🔒 Constant-time HMAC comparison • Brute-force rate limiting active (5 attempts / 15m lockout).</span>
+            </div>
+          </form>
+        </div>
+      </section>
+
+      <!-- ====================================================================
+           VIEW 2: ADMIN COMMAND CENTER (DASHBOARD)
+           ==================================================================== -->
+      <section class="dashboard-view admin-dashboard-view" id="admin-view-dashboard" style="display: none;">
+        
+        <!-- Metrics Row -->
+        <div class="stats-banner admin-metrics-banner">
+          <div class="stat-card">
+            <div class="stat-label">Active / Total Keys</div>
+            <div class="stat-value" id="m-keys-stat">0 / 0</div>
+            <div class="stat-sub">Valid, unexpired licenses</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">Total Key Redemptions</div>
+            <div class="stat-value" id="m-redeemed-stat">0</div>
+            <div class="stat-sub">Accounts verified & farmed</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">12-Slot Worker Pool</div>
+            <div class="stat-value" id="m-slots-stat">0 / 12</div>
+            <div class="stat-sub" id="m-queue-stat">Queue: 0 pending</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">Revoked Keys</div>
+            <div class="stat-value" id="m-revoked-stat">0</div>
+            <div class="stat-sub">Deactivated licenses</div>
+          </div>
+        </div>
+
+        <!-- Section: Key Generator Studio -->
+        <div class="admin-section-card">
+          <div class="admin-section-header">
+            <div>
+              <h2 class="admin-section-title">⚡ License Key Generator</h2>
+              <p class="admin-section-desc">Generate unique <code>XXXX-XXXX-XXXX</code> access keys with custom usage limits and client notes.</p>
+            </div>
+          </div>
+
+          <form id="key-gen-form" class="key-gen-grid" onsubmit="return false;">
+            <div class="key-gen-field">
+              <label for="gen-count" class="field-label">Quantity</label>
+              <select id="gen-count" class="admin-select">
+                <option value="1">1 Key</option>
+                <option value="5">5 Keys</option>
+                <option value="10">10 Keys</option>
+                <option value="25">25 Keys</option>
+                <option value="50">50 Keys</option>
+              </select>
+            </div>
+
+            <div class="key-gen-field">
+              <label for="gen-uses" class="field-label">Max Uses Per Key</label>
+              <input type="number" id="gen-uses" class="admin-input-sm" value="1" min="1" max="1000" placeholder="1">
+            </div>
+
+            <div class="key-gen-field" style="flex: 2;">
+              <label for="gen-note" class="field-label">Label / Client Note (Optional)</label>
+              <input type="text" id="gen-note" class="admin-input-sm" placeholder="e.g. VIP Customer, Discord Event, GiveAway #1...">
+            </div>
+
+            <div class="key-gen-btn-wrap">
+              <button type="submit" id="gen-submit-btn" class="primary-btn" style="padding: 11px 22px; font-size: 13px;">
+                <span>+ GENERATE KEYS</span>
+              </button>
+            </div>
+          </form>
+
+          <!-- Generated Keys Output Box -->
+          <div id="gen-output-box" class="gen-output-box" style="display: none;">
+            <div class="gen-output-header">
+              <span id="gen-output-title">✓ Newly Generated Keys</span>
+              <button type="button" id="copy-all-gen-btn" class="admin-action-btn copy-btn">
+                📋 COPY ALL KEYS
+              </button>
+            </div>
+            <div id="gen-output-list" class="gen-output-list"></div>
+          </div>
+        </div>
+
+        <!-- Section: Real-Time Key Tracking & Audit Log -->
+        <div class="admin-section-card">
+          <div class="admin-section-header">
+            <div>
+              <h2 class="admin-section-title">📊 Key Usage Tracking & Audit Log</h2>
+              <p class="admin-section-desc">Real-time log of every generated key, redemptions, Discord User IDs, usernames, timestamps, and client IPs.</p>
+            </div>
+            <button type="button" id="refresh-overview-btn" class="admin-action-btn" title="Refresh Data">
+              🔄 REFRESH
+            </button>
+          </div>
+
+          <!-- Filter & Search Toolbar -->
+          <div class="table-toolbar">
+            <div class="search-input-wrap">
+              <input type="text" id="table-search-input" class="admin-search-input" placeholder="Search by key, username, user ID, or note...">
+            </div>
+            <div class="filter-pills-group">
+              <button type="button" class="filter-pill active" data-filter="all">ALL (<span id="count-all">0</span>)</button>
+              <button type="button" class="filter-pill" data-filter="active">ACTIVE (<span id="count-active">0</span>)</button>
+              <button type="button" class="filter-pill" data-filter="used">USED (<span id="count-used">0</span>)</button>
+              <button type="button" class="filter-pill" data-filter="revoked">REVOKED (<span id="count-revoked">0</span>)</button>
+            </div>
+          </div>
+
+          <!-- Keys Table -->
+          <div class="table-responsive">
+            <table class="admin-table">
+              <thead>
+                <tr>
+                  <th>ACCESS KEY</th>
+                  <th>STATUS</th>
+                  <th>USAGE</th>
+                  <th>REDEEMED BY</th>
+                  <th>REDEMPTION TIME</th>
+                  <th>CLIENT IP</th>
+                  <th>NOTE / LABEL</th>
+                  <th style="text-align: right;">ACTIONS</th>
+                </tr>
+              </thead>
+              <tbody id="keys-table-body">
+                <tr>
+                  <td colspan="8" style="text-align: center; color: var(--text-muted); padding: 32px;">Loading license keys...</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Section: 12-Slot Concurrent Engine Pool Inspector -->
+        <div class="admin-section-card">
+          <div class="admin-section-header">
+            <div>
+              <h2 class="admin-section-title">🖥️ 12-Slot Engine Pool Control</h2>
+              <p class="admin-section-desc">Live status of concurrent farming workers with emergency kill-switch controls.</p>
+            </div>
+          </div>
+
+          <div class="admin-slots-grid" id="admin-slots-grid">
+            <!-- 12 slots rendered dynamically -->
+          </div>
+        </div>
+
+      </section>
+
+    </main>
+
+    <!-- Footer -->
+    <footer class="a4ku-footer">
+      <div>A4KU BADGE ENGINE • ADMIN CONTROL SYSTEM • SECURE LICENSING ROOT</div>
+    </footer>
+  </div>
+
+  <script src="/static/js/admin.js"></script>
+</body>
+</html>

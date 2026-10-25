@@ -10,9 +10,13 @@ Only requires:
 from __future__ import annotations
 
 import base64
+import hashlib
+import hmac
 import json
 import os
 import queue
+import secrets
+import string
 import subprocess
 import sys
 import tempfile
@@ -21,7 +25,7 @@ import time
 import uuid
 import urllib.error
 import urllib.request
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, asdict, field
 from pathlib import Path
 from typing import Generator, Sequence, Optional, Dict, Any
 
@@ -460,6 +464,275 @@ class SlotManager:
 
 MANAGER = SlotManager()
 
+# =========================================================================
+# Admin Portal & Key Licensing System Configuration
+# =========================================================================
+ADMIN_MASTER_KEY = os.environ.get(
+    "ADMIN_KEY",
+    "Cheeku_Bhen_ka_Lauda_ha_mera_choco_cheeku_ke_muh_me"
+)
+
+# In-memory admin session storage: session_token -> expiry_timestamp
+ADMIN_SESSIONS: Dict[str, float] = {}
+ADMIN_SESSION_LOCK = threading.Lock()
+ADMIN_SESSION_TTL = 86400  # 24 hours
+
+# Advanced Brute-Force Rate Limiting for Admin Portal:
+# IP -> {"count": int, "locked_until": float, "attempts": list[float]}
+FAILED_LOGIN_ATTEMPTS: Dict[str, dict] = {}
+LOGIN_ATTEMPTS_LOCK = threading.Lock()
+MAX_FAILED_ATTEMPTS = 5
+LOCKOUT_DURATION = 900  # 15 minutes (in seconds)
+
+
+def get_client_ip(req) -> str:
+    """Extract real client IP safely, accounting for proxies."""
+    forwarded = req.headers.get("X-Forwarded-For")
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+    return req.remote_addr or "127.0.0.1"
+
+
+def check_login_lockout(ip: str) -> tuple[bool, int]:
+    """Returns (is_locked, remaining_seconds)."""
+    now = time.time()
+    with LOGIN_ATTEMPTS_LOCK:
+        entry = FAILED_LOGIN_ATTEMPTS.get(ip)
+        if not entry:
+            return False, 0
+        locked_until = entry.get("locked_until", 0)
+        if now < locked_until:
+            return True, int(locked_until - now)
+        if locked_until and now >= locked_until:
+            FAILED_LOGIN_ATTEMPTS.pop(ip, None)
+    return False, 0
+
+
+def record_login_attempt(ip: str, success: bool):
+    """Record attempt; resets on success, locks out after 5 consecutive failures."""
+    now = time.time()
+    with LOGIN_ATTEMPTS_LOCK:
+        if success:
+            FAILED_LOGIN_ATTEMPTS.pop(ip, None)
+            return
+        entry = FAILED_LOGIN_ATTEMPTS.setdefault(ip, {"count": 0, "locked_until": 0, "attempts": []})
+        entry["attempts"].append(now)
+        # Keep attempts inside 15-minute sliding window
+        entry["attempts"] = [t for t in entry["attempts"] if now - t < 900]
+        entry["count"] = len(entry["attempts"])
+        if len(entry["attempts"]) >= MAX_FAILED_ATTEMPTS:
+            entry["locked_until"] = now + LOCKOUT_DURATION
+
+
+def create_admin_session() -> str:
+    """Generate high-entropy 256-bit admin session token."""
+    token = secrets.token_urlsafe(32)
+    now = time.time()
+    with ADMIN_SESSION_LOCK:
+        expired = [k for k, exp in ADMIN_SESSIONS.items() if now > exp]
+        for k in expired:
+            ADMIN_SESSIONS.pop(k, None)
+        ADMIN_SESSIONS[token] = now + ADMIN_SESSION_TTL
+    return token
+
+
+def is_admin_authenticated(req) -> bool:
+    """Authenticate admin session from header or cookie."""
+    token = req.headers.get("X-Admin-Session") or req.cookies.get("a4ku_admin_session")
+    if not token:
+        auth_hdr = req.headers.get("Authorization", "")
+        if auth_hdr.startswith("Bearer "):
+            token = auth_hdr[7:].strip()
+    if not token:
+        return False
+    now = time.time()
+    with ADMIN_SESSION_LOCK:
+        exp = ADMIN_SESSIONS.get(token)
+        if exp and now <= exp:
+            return True
+        if exp and now > exp:
+            ADMIN_SESSIONS.pop(token, None)
+    return False
+
+
+@dataclass
+class AccessKey:
+    key: str
+    created_at: float
+    max_uses: int = 1
+    uses_count: int = 0
+    status: str = "active"  # "active", "used", "revoked"
+    note: str = ""
+    redemptions: list = field(default_factory=list)
+
+    def to_dict(self) -> dict:
+        return {
+            "key": self.key,
+            "created_at": self.created_at,
+            "max_uses": self.max_uses,
+            "uses_count": self.uses_count,
+            "status": self.status,
+            "note": self.note,
+            "redemptions": self.redemptions,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> AccessKey:
+        return cls(
+            key=data["key"],
+            created_at=data.get("created_at", time.time()),
+            max_uses=data.get("max_uses", 1),
+            uses_count=data.get("uses_count", 0),
+            status=data.get("status", "active"),
+            note=data.get("note", ""),
+            redemptions=data.get("redemptions", []),
+        )
+
+
+class KeyManager:
+    def __init__(self, storage_path: Path):
+        self.storage_path = storage_path
+        self.lock = threading.Lock()
+        self.keys: Dict[str, AccessKey] = {}
+        self._load()
+
+    def _load(self):
+        with self.lock:
+            if not self.storage_path.exists():
+                self.keys = {}
+                init_key = self._generate_key_unlocked()
+                self.keys[init_key] = AccessKey(
+                    key=init_key,
+                    created_at=time.time(),
+                    max_uses=1,
+                    uses_count=0,
+                    status="active",
+                    note="Initial Master License"
+                )
+                self._save_unlocked()
+                return
+            try:
+                with open(self.storage_path, "r", encoding="utf-8") as f:
+                    raw = json.load(f)
+                    key_list = raw.get("keys", [])
+                    self.keys = {k["key"]: AccessKey.from_dict(k) for k in key_list}
+            except Exception as exc:
+                print(f"[KeyManager] Error loading {self.storage_path}: {exc}")
+                self.keys = {}
+
+    def _save_unlocked(self):
+        try:
+            temp_path = self.storage_path.with_suffix(".tmp")
+            data = {"keys": [k.to_dict() for k in self.keys.values()]}
+            with open(temp_path, "w", encoding="utf-8") as f:
+                json.dump(data, f, indent=2)
+            temp_path.replace(self.storage_path)
+        except Exception as exc:
+            print(f"[KeyManager] Error saving keys: {exc}")
+
+    def _generate_key_unlocked(self) -> str:
+        charset = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+        for _ in range(100):
+            p1 = "".join(secrets.choice(charset) for _ in range(4))
+            p2 = "".join(secrets.choice(charset) for _ in range(4))
+            p3 = "".join(secrets.choice(charset) for _ in range(4))
+            candidate = f"{p1}-{p2}-{p3}"
+            if candidate not in self.keys:
+                return candidate
+        return f"A4KU-{secrets.token_hex(2).upper()}-{secrets.token_hex(2).upper()}"
+
+    def create_keys(self, count: int = 1, max_uses: int = 1, note: str = "") -> list[str]:
+        count = max(1, min(count, 100))
+        max_uses = max(1, min(max_uses, 1000))
+        created = []
+        with self.lock:
+            now = time.time()
+            for _ in range(count):
+                k_str = self._generate_key_unlocked()
+                key_obj = AccessKey(
+                    key=k_str,
+                    created_at=now,
+                    max_uses=max_uses,
+                    uses_count=0,
+                    status="active",
+                    note=note.strip()
+                )
+                self.keys[k_str] = key_obj
+                created.append(k_str)
+            self._save_unlocked()
+        return created
+
+    def validate_key(self, key_str: str) -> tuple[bool, str, Optional[AccessKey]]:
+        key_str = key_str.strip().upper()
+        if not key_str:
+            return False, "Access Key is required. Please paste your key to start badge farming.", None
+        with self.lock:
+            if key_str not in self.keys:
+                return False, "Invalid Access Key. Please obtain a valid key from the Admin Portal.", None
+            key_obj = self.keys[key_str]
+            if key_obj.status == "revoked":
+                return False, "This Access Key has been revoked by the administrator.", None
+            if key_obj.uses_count >= key_obj.max_uses:
+                return False, "This Access Key has already reached its maximum usage limit.", None
+            return True, "", key_obj
+
+    def record_redemption(self, key_str: str, user_id: str, username: str, ip: str, session_id: str) -> bool:
+        key_str = key_str.strip().upper()
+        with self.lock:
+            if key_str not in self.keys:
+                return False
+            k = self.keys[key_str]
+            k.uses_count += 1
+            if k.uses_count >= k.max_uses:
+                k.status = "used"
+            k.redemptions.append({
+                "user_id": user_id,
+                "username": username,
+                "timestamp": time.time(),
+                "ip": ip or "Unknown",
+                "session_id": session_id
+            })
+            self._save_unlocked()
+            return True
+
+    def revoke_key(self, key_str: str) -> bool:
+        key_str = key_str.strip().upper()
+        with self.lock:
+            if key_str in self.keys:
+                self.keys[key_str].status = "revoked"
+                self._save_unlocked()
+                return True
+            return False
+
+    def delete_key(self, key_str: str) -> bool:
+        key_str = key_str.strip().upper()
+        with self.lock:
+            if key_str in self.keys:
+                del self.keys[key_str]
+                self._save_unlocked()
+                return True
+            return False
+
+    def get_summary(self) -> dict:
+        with self.lock:
+            all_keys = list(self.keys.values())
+            all_keys.sort(key=lambda x: x.created_at, reverse=True)
+            active_count = sum(1 for k in all_keys if k.status == "active" and k.uses_count < k.max_uses)
+            used_count = sum(1 for k in all_keys if k.uses_count >= k.max_uses or k.status == "used")
+            revoked_count = sum(1 for k in all_keys if k.status == "revoked")
+            total_redemptions = sum(len(k.redemptions) for k in all_keys)
+            return {
+                "total_keys": len(all_keys),
+                "active_keys": active_count,
+                "used_keys": used_count,
+                "revoked_keys": revoked_count,
+                "total_redemptions": total_redemptions,
+                "keys": [k.to_dict() for k in all_keys]
+            }
+
+
+KEY_MANAGER = KeyManager(ROOT / "keys.json")
+
 
 class QueueManager:
     def __init__(self, slot_manager: SlotManager):
@@ -480,7 +753,7 @@ class QueueManager:
                 "availableSlots": max(0, MAX_SLOTS - active_count)
             }
 
-    def join(self, session_id: str, token: str, cookie: str):
+    def join(self, session_id: str, token: str, cookie: str, key: str, ip: str = ""):
         with self.lock:
             now = time.time()
             self.waiting_queue = [q for q in self.waiting_queue if (now - q.get("last_seen", now)) < 60]
@@ -490,9 +763,16 @@ class QueueManager:
                 slot = self.slot_manager.slots[slot_id]
                 if slot.status == "running":
                     return {"status": "active", "position": 0, "slot": slot.to_dict()}
-                # Previous run finished or stopped - clear for new farm run
                 self.active_sessions.pop(session_id, None)
                 slot.clear()
+
+            # First: Validate access key before doing any work
+            key_clean = key.strip().upper()
+            if not key_clean:
+                return {"status": "error", "error": "Access Key is required. Please paste your key to start badge farming."}
+            is_valid, err_msg, _ = KEY_MANAGER.validate_key(key_clean)
+            if not is_valid:
+                return {"status": "error", "error": err_msg}
 
             for idx, item in enumerate(self.waiting_queue):
                 if item["sessionId"] == session_id:
@@ -501,7 +781,7 @@ class QueueManager:
 
             free_slot = self._find_free_slot()
             if free_slot and len(self.waiting_queue) == 0:
-                err, udata = self._setup_and_start(free_slot, session_id, token, cookie)
+                err, udata = self._setup_and_start(free_slot, session_id, token, cookie, key_clean, ip)
                 if err:
                     return {"status": "error", "error": err}
                 return {"status": "active", "position": 0, "slot": free_slot.to_dict()}
@@ -510,6 +790,8 @@ class QueueManager:
                 "sessionId": session_id,
                 "token": token,
                 "cookie": cookie,
+                "key": key_clean,
+                "ip": ip,
                 "joined_at": now,
                 "last_seen": now
             })
@@ -538,7 +820,14 @@ class QueueManager:
                     free_slot = self._find_free_slot()
                     if free_slot:
                         item = self.waiting_queue.pop(0)
-                        err, _ = self._setup_and_start(free_slot, item["sessionId"], item["token"], item["cookie"])
+                        err, _ = self._setup_and_start(
+                            free_slot,
+                            item["sessionId"],
+                            item["token"],
+                            item["cookie"],
+                            item.get("key", ""),
+                            item.get("ip", "")
+                        )
                         if not err:
                             return {"status": "active", "position": 0, "slot": free_slot.to_dict(), "activeCount": self._active_count(), "maxSlots": MAX_SLOTS}
 
@@ -551,7 +840,6 @@ class QueueManager:
                 }
 
             return {"status": "idle", "activeCount": self._active_count(), "maxSlots": MAX_SLOTS}
-
 
     def abort(self, session_id: str):
         with self.lock:
@@ -575,7 +863,7 @@ class QueueManager:
                 return s
         return None
 
-    def _setup_and_start(self, slot: AccountSlot, session_id: str, token: str, cookie: str):
+    def _setup_and_start(self, slot: AccountSlot, session_id: str, token: str, cookie: str, key: str = "", ip: str = ""):
         global GLOBAL_GAMES
         hb = str(uuid.uuid4())
         ls = str(uuid.uuid4())
@@ -584,6 +872,16 @@ class QueueManager:
             analytics_token, udata = verify_account(token, super_props)
         except Exception as exc:
             return str(exc), None
+
+        # Verify succeeded: Record key redemption now (guarantees key isn't burned on bad Discord tokens)
+        if key:
+            KEY_MANAGER.record_redemption(
+                key_str=key,
+                user_id=udata.get("id", ""),
+                username=udata.get("username", "User"),
+                ip=ip,
+                session_id=session_id
+            )
 
         avatar_hash = udata.get("avatar")
         uid = udata.get("id", "")
@@ -618,10 +916,18 @@ class QueueManager:
             free = self._find_free_slot()
             if free:
                 next_item = self.waiting_queue.pop(0)
-                self._setup_and_start(free, next_item["sessionId"], next_item["token"], next_item["cookie"])
+                self._setup_and_start(
+                    free,
+                    next_item["sessionId"],
+                    next_item["token"],
+                    next_item["cookie"],
+                    next_item.get("key", ""),
+                    next_item.get("ip", "")
+                )
 
 
 QUEUE_MANAGER = QueueManager(MANAGER)
+
 
 
 # Worker thread function for each slot
@@ -835,11 +1141,15 @@ def handle_queue():
     if action == "join":
         token = data.get("token", "").strip()
         cookie = data.get("cookie", "").strip()
+        key = data.get("key", "").strip()
         if not token:
             return jsonify({"status": "error", "error": "Token is required."}), 400
         if not cookie:
             return jsonify({"status": "error", "error": "cf_clearance cookie is required."}), 400
-        res = QUEUE_MANAGER.join(session_id, token, cookie)
+        if not key:
+            return jsonify({"status": "error", "error": "Access Key is required. Please paste your key to start badge farming."}), 400
+        client_ip = get_client_ip(request)
+        res = QUEUE_MANAGER.join(session_id, token, cookie, key, client_ip)
         return jsonify(res)
 
     if action == "poll":
@@ -849,6 +1159,144 @@ def handle_queue():
         return jsonify(QUEUE_MANAGER.abort(session_id))
 
     return jsonify({"error": f"Unknown action: {action}"}), 400
+
+
+# =========================================================================
+# Admin Portal & Key Tracking Routes
+# =========================================================================
+@app.route("/admin")
+@app.route("/admin/")
+def admin_portal():
+    return render_template("admin.html")
+
+
+@app.route("/api/admin/login", methods=["POST"])
+def admin_login():
+    client_ip = get_client_ip(request)
+    is_locked, rem_secs = check_login_lockout(client_ip)
+    if is_locked:
+        return jsonify({
+            "success": False,
+            "error": f"Security Lockout: Too many failed login attempts. Try again in {rem_secs} seconds."
+        }), 429
+
+    data = request.get_json(silent=True) or {}
+    password = data.get("password", "")
+
+    if not password:
+        record_login_attempt(client_ip, False)
+        return jsonify({"success": False, "error": "Master security key is required."}), 400
+
+    # Constant-time comparison to prevent timing attacks
+    if not hmac.compare_digest(password.encode("utf-8"), ADMIN_MASTER_KEY.encode("utf-8")):
+        record_login_attempt(client_ip, False)
+        with LOGIN_ATTEMPTS_LOCK:
+            entry = FAILED_LOGIN_ATTEMPTS.get(client_ip, {})
+            rem_attempts = max(0, MAX_FAILED_ATTEMPTS - len(entry.get("attempts", [])))
+        return jsonify({
+            "success": False,
+            "error": f"Invalid Master Security Key. ({rem_attempts} attempts remaining before 15-minute IP lockout)."
+        }), 401
+
+    # Successful login: reset brute-force counters and create session
+    record_login_attempt(client_ip, True)
+    session_token = create_admin_session()
+    resp = jsonify({"success": True, "token": session_token})
+    resp.set_cookie("a4ku_admin_session", session_token, httponly=True, samesite="Strict", max_age=86400)
+    return resp
+
+
+@app.route("/api/admin/logout", methods=["POST"])
+def admin_logout():
+    token = request.headers.get("X-Admin-Session") or request.cookies.get("a4ku_admin_session")
+    if token:
+        with ADMIN_SESSION_LOCK:
+            ADMIN_SESSIONS.pop(token, None)
+    resp = jsonify({"success": True})
+    resp.delete_cookie("a4ku_admin_session")
+    return resp
+
+
+@app.route("/api/admin/overview", methods=["GET"])
+def admin_overview():
+    if not is_admin_authenticated(request):
+        return jsonify({"error": "Unauthorized. Please authenticate with Admin Master Key."}), 401
+
+    summary = KEY_MANAGER.get_summary()
+    slots_info = MANAGER.get_summary()["slots"]
+    queue_info = QUEUE_MANAGER.get_status()
+
+    return jsonify({
+        "success": True,
+        "metrics": {
+            "total_keys": summary["total_keys"],
+            "active_keys": summary["active_keys"],
+            "used_keys": summary["used_keys"],
+            "revoked_keys": summary["revoked_keys"],
+            "total_redemptions": summary["total_redemptions"],
+            "active_slots": queue_info["activeCount"],
+            "max_slots": MAX_SLOTS,
+            "queue_length": queue_info["queueLength"]
+        },
+        "keys": summary["keys"],
+        "slots": slots_info,
+        "queue": queue_info
+    })
+
+
+@app.route("/api/admin/keys/create", methods=["POST"])
+def admin_create_keys():
+    if not is_admin_authenticated(request):
+        return jsonify({"error": "Unauthorized"}), 401
+    data = request.get_json(silent=True) or {}
+    try:
+        count = int(data.get("count", 1))
+    except (ValueError, TypeError):
+        count = 1
+    try:
+        max_uses = int(data.get("max_uses", 1))
+    except (ValueError, TypeError):
+        max_uses = 1
+    note = str(data.get("note", "")).strip()
+
+    new_keys = KEY_MANAGER.create_keys(count=count, max_uses=max_uses, note=note)
+    return jsonify({"success": True, "keys": new_keys, "count": len(new_keys)})
+
+
+@app.route("/api/admin/keys/revoke", methods=["POST"])
+def admin_revoke_key():
+    if not is_admin_authenticated(request):
+        return jsonify({"error": "Unauthorized"}), 401
+    data = request.get_json(silent=True) or {}
+    key_str = data.get("key", "").strip()
+    ok = KEY_MANAGER.revoke_key(key_str)
+    return jsonify({"success": ok})
+
+
+@app.route("/api/admin/keys/delete", methods=["POST"])
+def admin_delete_key():
+    if not is_admin_authenticated(request):
+        return jsonify({"error": "Unauthorized"}), 401
+    data = request.get_json(silent=True) or {}
+    key_str = data.get("key", "").strip()
+    ok = KEY_MANAGER.delete_key(key_str)
+    return jsonify({"success": ok})
+
+
+@app.route("/api/admin/slot/stop", methods=["POST"])
+def admin_stop_slot():
+    if not is_admin_authenticated(request):
+        return jsonify({"error": "Unauthorized"}), 401
+    data = request.get_json(silent=True) or {}
+    slot_id = int(data.get("slot_id", 0))
+    if slot_id in MANAGER.slots:
+        slot = MANAGER.slots[slot_id]
+        slot.stop()
+        slot.clear()
+        MANAGER.broadcast("slot_update", slot.to_dict())
+        QUEUE_MANAGER._check_queue_promotion()
+        return jsonify({"success": True, "message": f"Slot #{slot_id} stopped and cleared."})
+    return jsonify({"error": "Invalid slot_id"}), 400
 
 
 

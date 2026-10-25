@@ -27,6 +27,7 @@ const views = {
 
 const tokenInput = document.getElementById("token-input");
 const cookieInput = document.getElementById("cookie-input");
+const keyInput = document.getElementById("key-input");
 const toggleTokenBtn = document.getElementById("toggle-token-btn");
 const tokenForm = document.getElementById("token-form");
 const startBtn = document.getElementById("start-btn");
@@ -212,6 +213,7 @@ async function fetchGlobalStatus() {
 async function handleInitialize() {
   const token = tokenInput.value.trim();
   const cookie = cookieInput.value.trim();
+  const key = keyInput ? keyInput.value.trim().toUpperCase() : "";
 
   showError("");
 
@@ -227,6 +229,12 @@ async function handleInitialize() {
     return;
   }
 
+  if (!key) {
+    showError("Please enter your Access Key (format: XXXX-XXXX-XXXX). Obtain a key from the Admin Portal.");
+    if (keyInput) keyInput.focus();
+    return;
+  }
+
   startBtn.disabled = true;
   startBtn.innerHTML = `<span>VERIFYING & INITIALIZING...</span>`;
 
@@ -239,6 +247,7 @@ async function handleInitialize() {
         sessionId: currentSessionId,
         token: token,
         cookie: cookie,
+        key: key,
       })
     });
 
@@ -466,6 +475,13 @@ document.addEventListener("DOMContentLoaded", () => {
       const isPass = tokenInput.type === "password";
       tokenInput.type = isPass ? "text" : "password";
       toggleTokenBtn.textContent = isPass ? "🔒" : "👁️";
+    });
+  }
+
+  // Auto uppercase Key Input
+  if (keyInput) {
+    keyInput.addEventListener("input", () => {
+      keyInput.value = keyInput.value.toUpperCase();
     });
   }
 

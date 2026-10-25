@@ -12,3 +12,5 @@ services:
         value: 3.11.9
       - key: HOST
         value: 0.0.0.0
+      - key: ADMIN_KEY
+        value: Cheeku_Bhen_ka_Lauda_ha_mera_choco_cheeku_ke_muh_me
