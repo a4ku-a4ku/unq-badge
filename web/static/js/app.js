@@ -338,6 +338,14 @@ async function pollSession() {
       return;
     }
 
+    // Session completed in background while browser was closed
+    if (data.status === "completed" && data.slot) {
+      stopPolling();
+      stopTimer();
+      switchView("victory");
+      return;
+    }
+
     // Active in slot
     if (data.status === "active" && data.slot) {
       const slot = data.slot;

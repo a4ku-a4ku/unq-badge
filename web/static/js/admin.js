@@ -53,6 +53,15 @@
   // Slots
   const adminSlotsGrid = document.getElementById("admin-slots-grid");
 
+  // Edit Key Uses Modal
+  let currentEditingKey = "";
+  const editUsesModal = document.getElementById("edit-uses-modal");
+  const modalEditKeyCode = document.getElementById("modal-edit-key-code");
+  const modalEditUsesInput = document.getElementById("modal-edit-uses-input");
+  const editUsesClose = document.getElementById("edit-uses-close");
+  const modalCancelEditBtn = document.getElementById("modal-cancel-edit-btn");
+  const modalSaveUsesBtn = document.getElementById("modal-save-uses-btn");
+
   // ── Toast Utility ──────────────────────────────────────────────────────────
   function showToast(message, isError = false) {
     if (!adminToast) return;
@@ -283,6 +292,9 @@
       }
 
       const noteText = k.note ? escapeHtml(k.note) : '<span style="color: var(--text-muted);">—</span>';
+      const isUnlimited = k.max_uses >= 999999;
+      const maxUsesLabel = isUnlimited ? '∞ (Unlimited)' : k.max_uses;
+      const remainingText = isUnlimited ? 'Unlimited' : Math.max(0, k.max_uses - k.uses_count) + ' left';
 
       return `
         <tr data-key="${k.key}">
@@ -295,13 +307,21 @@
             </div>
           </td>
           <td><span class="status-pill-badge ${statusBadgeClass}">${statusText}</span></td>
-          <td><span class="usage-count-text">${k.uses_count} / ${k.max_uses}</span></td>
+          <td>
+            <span class="usage-count-text">${k.uses_count} / ${maxUsesLabel}</span>
+            <div style="font-family: var(--font-mono); font-size: 10px; color: var(--text-muted); margin-top: 2px;">
+              ${remainingText}
+            </div>
+          </td>
           <td>${userDisplay}</td>
           <td>${timeDisplay}</td>
           <td>${ipDisplay}</td>
           <td>${noteText}</td>
           <td style="text-align: right;">
             <div class="action-btn-row">
+              <button type="button" class="btn-table-action btn-edit-uses" onclick="window.adminOpenEditUses('${k.key}', ${k.max_uses})" title="Change allowed uses">
+                Edit Uses
+              </button>
               ${!isRevoked ? `
                 <button type="button" class="btn-table-action btn-revoke" onclick="window.adminRevokeKey('${k.key}')" title="Revoke this key">
                   Revoke
@@ -432,7 +452,17 @@
     } catch (e) {
       showToast("Error communicating with server.", true);
     }
+  window.adminOpenEditUses = function (keyStr, currentMaxUses) {
+    currentEditingKey = keyStr;
+    if (modalEditKeyCode) modalEditKeyCode.textContent = keyStr;
+    if (modalEditUsesInput) modalEditUsesInput.value = currentMaxUses >= 999999 ? 999999 : currentMaxUses;
+    if (editUsesModal) editUsesModal.style.display = "flex";
   };
+
+  function closeEditUsesModal() {
+    if (editUsesModal) editUsesModal.style.display = "none";
+    currentEditingKey = "";
+  }
 
   window.adminStopSlot = async function (slotId) {
     if (!confirm(`Emergency stop worker in Slot #${slotId}? Current spoofing session will be stopped immediately.`)) {
@@ -569,6 +599,80 @@
         renderKeysTable();
       });
     });
+
+    // Preset buttons in Key Generator Form
+    const presetBtns = document.querySelectorAll(".uses-preset-row .preset-use-btn");
+    presetBtns.forEach(btn => {
+      btn.addEventListener("click", () => {
+        const val = btn.getAttribute("data-val");
+        const parentRow = btn.closest(".uses-preset-row");
+        if (val && parentRow && parentRow.previousElementSibling) {
+          parentRow.previousElementSibling.value = val;
+          parentRow.querySelectorAll(".preset-use-btn").forEach(b => b.classList.remove("active"));
+          btn.classList.add("active");
+        }
+      });
+    });
+
+    if (genUsesInput) {
+      genUsesInput.addEventListener("input", () => {
+        const currentVal = genUsesInput.value;
+        const parentRow = genUsesInput.parentElement ? genUsesInput.parentElement.querySelector(".uses-preset-row") : null;
+        if (parentRow) {
+          parentRow.querySelectorAll(".preset-use-btn").forEach(b => {
+            if (b.getAttribute("data-val") === currentVal) {
+              b.classList.add("active");
+            } else {
+              b.classList.remove("active");
+            }
+          });
+        }
+      });
+    }
+
+    // Modal close & save listeners
+    if (editUsesClose) editUsesClose.addEventListener("click", closeEditUsesModal);
+    if (modalCancelEditBtn) modalCancelEditBtn.addEventListener("click", closeEditUsesModal);
+    if (editUsesModal) {
+      editUsesModal.addEventListener("click", (e) => {
+        if (e.target === editUsesModal) closeEditUsesModal();
+      });
+    }
+
+    if (modalSaveUsesBtn) {
+      modalSaveUsesBtn.addEventListener("click", async () => {
+        if (!currentEditingKey) return;
+        const newMax = parseInt(modalEditUsesInput ? modalEditUsesInput.value : 1, 10);
+        if (isNaN(newMax) || newMax < 1) {
+          showToast("Please enter a valid number of uses (minimum 1).", true);
+          return;
+        }
+        modalSaveUsesBtn.disabled = true;
+        modalSaveUsesBtn.textContent = "SAVING...";
+        try {
+          const res = await fetch("/api/admin/keys/update_uses", {
+            method: "POST",
+            headers: getAuthHeaders(),
+            body: JSON.stringify({ key: currentEditingKey, max_uses: newMax })
+          });
+          const data = await res.json();
+          if (data.success) {
+            showToast(`✓ Limit for ${currentEditingKey} updated to ${newMax >= 999999 ? 'Unlimited' : newMax} uses!`);
+            closeEditUsesModal();
+            await loadOverview();
+          } else {
+            showToast(data.error || "Failed to update key limit.", true);
+          }
+        } catch (e) {
+          showToast("Error communicating with server.", true);
+        } finally {
+          if (modalSaveUsesBtn) {
+            modalSaveUsesBtn.disabled = false;
+            modalSaveUsesBtn.textContent = "SAVE LIMIT";
+          }
+        }
+      });
+    }
 
     // Check if existing session is stored
     if (adminToken) {

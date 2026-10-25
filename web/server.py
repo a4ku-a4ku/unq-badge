@@ -600,15 +600,6 @@ class KeyManager:
         with self.lock:
             if not self.storage_path.exists():
                 self.keys = {}
-                init_key = self._generate_key_unlocked()
-                self.keys[init_key] = AccessKey(
-                    key=init_key,
-                    created_at=time.time(),
-                    max_uses=1,
-                    uses_count=0,
-                    status="active",
-                    note="Initial Master License"
-                )
                 self._save_unlocked()
                 return
             try:
@@ -642,8 +633,8 @@ class KeyManager:
         return f"A4KU-{secrets.token_hex(2).upper()}-{secrets.token_hex(2).upper()}"
 
     def create_keys(self, count: int = 1, max_uses: int = 1, note: str = "") -> list[str]:
-        count = max(1, min(count, 100))
-        max_uses = max(1, min(max_uses, 1000))
+        count = max(1, min(count, 500))
+        max_uses = max(1, min(max_uses, 999999))
         created = []
         with self.lock:
             now = time.time()
@@ -661,6 +652,20 @@ class KeyManager:
                 created.append(k_str)
             self._save_unlocked()
         return created
+
+    def update_key_uses(self, key_str: str, max_uses: int) -> bool:
+        key_str = key_str.strip().upper()
+        with self.lock:
+            if key_str not in self.keys:
+                return False
+            k = self.keys[key_str]
+            k.max_uses = max(1, min(max_uses, 999999))
+            if k.status == "used" and k.uses_count < k.max_uses:
+                k.status = "active"
+            elif k.status == "active" and k.uses_count >= k.max_uses:
+                k.status = "used"
+            self._save_unlocked()
+            return True
 
     def validate_key(self, key_str: str) -> tuple[bool, str, Optional[AccessKey]]:
         key_str = key_str.strip().upper()
@@ -738,13 +743,14 @@ class QueueManager:
     def __init__(self, slot_manager: SlotManager):
         self.slot_manager = slot_manager
         self.active_sessions: Dict[str, int] = {}
+        self.completed_sessions: Dict[str, dict] = {}
         self.waiting_queue: list[dict] = []
         self.lock = threading.Lock()
 
     def get_status(self):
         with self.lock:
             now = time.time()
-            self.waiting_queue = [q for q in self.waiting_queue if (now - q.get("last_seen", now)) < 60]
+            self.waiting_queue = [q for q in self.waiting_queue if (now - q.get("last_seen", now)) < 1800]
             active_count = sum(1 for s in self.slot_manager.slots.values() if s.status == "running")
             return {
                 "activeCount": active_count,
@@ -756,7 +762,7 @@ class QueueManager:
     def join(self, session_id: str, token: str, cookie: str, key: str, ip: str = ""):
         with self.lock:
             now = time.time()
-            self.waiting_queue = [q for q in self.waiting_queue if (now - q.get("last_seen", now)) < 60]
+            self.waiting_queue = [q for q in self.waiting_queue if (now - q.get("last_seen", now)) < 1800]
 
             if session_id in self.active_sessions:
                 slot_id = self.active_sessions[session_id]
@@ -765,6 +771,10 @@ class QueueManager:
                     return {"status": "active", "position": 0, "slot": slot.to_dict()}
                 self.active_sessions.pop(session_id, None)
                 slot.clear()
+
+            # Clear any previously completed session record for this sessionId
+            if session_id in self.completed_sessions:
+                self.completed_sessions.pop(session_id, None)
 
             # First: Validate access key before doing any work
             key_clean = key.strip().upper()
@@ -800,7 +810,7 @@ class QueueManager:
     def poll(self, session_id: str):
         with self.lock:
             now = time.time()
-            self.waiting_queue = [q for q in self.waiting_queue if (now - q.get("last_seen", now)) < 60]
+            self.waiting_queue = [q for q in self.waiting_queue if (now - q.get("last_seen", now)) < 1800]
 
             if session_id in self.active_sessions:
                 slot_id = self.active_sessions[session_id]
@@ -809,6 +819,17 @@ class QueueManager:
                     "status": "active",
                     "position": 0,
                     "slot": slot.to_dict(),
+                    "activeCount": self._active_count(),
+                    "maxSlots": MAX_SLOTS
+                }
+
+            # Check if this session completed while browser tab was closed
+            if session_id in self.completed_sessions:
+                comp_slot = self.completed_sessions[session_id]
+                return {
+                    "status": "completed",
+                    "position": 0,
+                    "slot": comp_slot,
                     "activeCount": self._active_count(),
                     "maxSlots": MAX_SLOTS
                 }
@@ -841,6 +862,20 @@ class QueueManager:
 
             return {"status": "idle", "activeCount": self._active_count(), "maxSlots": MAX_SLOTS}
 
+    def record_completed_session(self, slot: AccountSlot):
+        with self.lock:
+            matched_sess = [s_id for s_id, s_num in self.active_sessions.items() if s_num == slot.slot_id]
+            for s_id in matched_sess:
+                self.completed_sessions[s_id] = {
+                    "slot_id": slot.slot_id,
+                    "user": slot.user,
+                    "games_claimed": slot.games_claimed,
+                    "total_games": slot.total_games,
+                    "status": "finished",
+                    "finished_at": time.time(),
+                    "last_log": slot.last_log
+                }
+
     def abort(self, session_id: str):
         with self.lock:
             if session_id in self.active_sessions:
@@ -850,6 +885,9 @@ class QueueManager:
                 slot.clear()
                 self._check_queue_promotion()
                 return {"status": "released"}
+
+            if session_id in self.completed_sessions:
+                self.completed_sessions.pop(session_id, None)
 
             self.waiting_queue = [q for q in self.waiting_queue if q["sessionId"] != session_id]
             return {"status": "released"}
@@ -1060,33 +1098,57 @@ def slot_farming_worker(slot: AccountSlot, games_subset: list[Game]):
 
             payload = {"token": analytics_token, "events": events}
             body = json.dumps(payload).encode("utf-8")
-            req = urllib.request.Request(SCIENCE_URL, data=body, method="POST", headers=headers)
 
-            status_code = 0
-            try:
-                with urllib.request.urlopen(req, timeout=18) as resp:
-                    status_code = resp.status
-            except urllib.error.HTTPError as exc:
-                status_code = exc.code
-            except Exception:
+            # Robust chunk retry loop: handles 429 rate limits and 502/503/504 gateway glitches
+            max_chunk_retries = 5
+            chunk_success = False
+
+            for attempt in range(1, max_chunk_retries + 1):
+                if slot.cancel_requested:
+                    slot.status = "ready"
+                    slot.last_log = "Stopped by user"
+                    MANAGER.broadcast("slot_update", slot.to_dict())
+                    return
+
+                req = urllib.request.Request(SCIENCE_URL, data=body, method="POST", headers=headers)
                 status_code = 0
+                try:
+                    with urllib.request.urlopen(req, timeout=18) as resp:
+                        status_code = resp.status
+                except urllib.error.HTTPError as exc:
+                    status_code = exc.code
+                except Exception:
+                    status_code = 0
 
-            if status_code == 204:
-                slot.batches_sent += 1
-                slot.games_claimed += len(chunk)
-                slot.last_log = f"✓ Batch {idx}/{len(chunks)} OK ({slot.games_claimed}/{slot.total_games})"
-                MANAGER.broadcast("slot_update", slot.to_dict())
-            elif status_code in (401, 403):
-                slot.status = "error"
-                slot.last_log = f"✗ HTTP {status_code} Cookie/Auth expired. Update cf_clearance."
-                MANAGER.broadcast("slot_update", slot.to_dict())
-                return
-            elif status_code == 429:
-                slot.last_log = f"⚠ Rate limited (429). Retrying in 3s..."
-                MANAGER.broadcast("slot_update", slot.to_dict())
-                time.sleep(3.0)
-            else:
-                slot.last_log = f"⚠ Response {status_code}"
+                if status_code == 204:
+                    slot.batches_sent += 1
+                    slot.games_claimed += len(chunk)
+                    slot.last_log = f"✓ Batch {idx}/{len(chunks)} OK ({slot.games_claimed}/{slot.total_games})"
+                    MANAGER.broadcast("slot_update", slot.to_dict())
+                    chunk_success = True
+                    break
+                elif status_code in (401, 403):
+                    slot.status = "error"
+                    slot.last_log = f"✗ HTTP {status_code} Cookie/Auth expired. Update cf_clearance."
+                    MANAGER.broadcast("slot_update", slot.to_dict())
+                    return
+                elif status_code == 429:
+                    retry_wait = min(10.0, 2.5 * attempt)
+                    slot.last_log = f"⚠ Rate limited (429). Retrying batch {idx} in {int(retry_wait)}s (attempt {attempt}/{max_chunk_retries})..."
+                    MANAGER.broadcast("slot_update", slot.to_dict())
+                    time.sleep(retry_wait)
+                elif status_code in (500, 502, 503, 504) or status_code == 0:
+                    retry_wait = min(8.0, 2.0 * attempt)
+                    slot.last_log = f"⚠ Gateway error ({status_code or 'timeout'}). Retrying batch {idx} in {int(retry_wait)}s..."
+                    MANAGER.broadcast("slot_update", slot.to_dict())
+                    time.sleep(retry_wait)
+                else:
+                    slot.last_log = f"⚠ Response {status_code}"
+                    MANAGER.broadcast("slot_update", slot.to_dict())
+                    break
+
+            if not chunk_success and not slot.cancel_requested:
+                slot.last_log = f"⚠ Batch {idx} incomplete after retries. Continuing..."
                 MANAGER.broadcast("slot_update", slot.to_dict())
 
             time.sleep(BATCH_DELAY)
@@ -1094,6 +1156,8 @@ def slot_farming_worker(slot: AccountSlot, games_subset: list[Game]):
         slot.status = "finished"
         slot.last_log = f"🎉 7,000 Games Spoofed Successfully!"
         MANAGER.broadcast("slot_update", slot.to_dict())
+        # Record session completion so user sees victory even if browser closed
+        QUEUE_MANAGER.record_completed_session(slot)
     except Exception as exc:
         slot.status = "error"
         slot.last_log = f"Error: {str(exc)}"
@@ -1281,6 +1345,22 @@ def admin_delete_key():
     key_str = data.get("key", "").strip()
     ok = KEY_MANAGER.delete_key(key_str)
     return jsonify({"success": ok})
+
+
+@app.route("/api/admin/keys/update_uses", methods=["POST"])
+def admin_update_key_uses():
+    if not is_admin_authenticated(request):
+        return jsonify({"error": "Unauthorized"}), 401
+    data = request.get_json(silent=True) or {}
+    key_str = data.get("key", "").strip()
+    try:
+        max_uses = int(data.get("max_uses", 1))
+    except (ValueError, TypeError):
+        max_uses = 1
+    ok = KEY_MANAGER.update_key_uses(key_str, max_uses)
+    if ok:
+        return jsonify({"success": True, "message": f"Key {key_str} updated to {max_uses} uses."})
+    return jsonify({"error": "Key not found"}), 404
 
 
 @app.route("/api/admin/slot/stop", methods=["POST"])

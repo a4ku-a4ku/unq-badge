@@ -138,8 +138,16 @@
             </div>
 
             <div class="key-gen-field">
-              <label for="gen-uses" class="field-label">Max Uses Per Key</label>
-              <input type="number" id="gen-uses" class="admin-input-sm" value="1" min="1" max="1000" placeholder="1">
+              <label for="gen-uses" class="field-label">Custom Uses Per Key</label>
+              <input type="number" id="gen-uses" class="admin-input-sm" value="1" min="1" max="999999" placeholder="1">
+              <div class="uses-preset-row">
+                <button type="button" class="preset-use-btn active" data-val="1">1 Use</button>
+                <button type="button" class="preset-use-btn" data-val="3">3 Uses</button>
+                <button type="button" class="preset-use-btn" data-val="5">5 Uses</button>
+                <button type="button" class="preset-use-btn" data-val="10">10 Uses</button>
+                <button type="button" class="preset-use-btn" data-val="50">50 Uses</button>
+                <button type="button" class="preset-use-btn" data-val="999999">Unlimited (∞)</button>
+              </div>
             </div>
 
             <div class="key-gen-field" style="flex: 2;">
@@ -232,6 +240,37 @@
       </section>
 
     </main>
+
+    <!-- Edit Key Uses Modal -->
+    <div class="slots-modal-backdrop" id="edit-uses-modal">
+      <div class="slots-modal" style="max-width: 440px;">
+        <div class="slots-modal-header">
+          <div class="slots-modal-title">Customize Key Usage Limit</div>
+          <button type="button" class="slots-modal-close" id="edit-uses-close">&times;</button>
+        </div>
+        <div class="slots-modal-body" style="display: flex; flex-direction: column; gap: 16px; padding: 24px;">
+          <p style="font-size: 13px; color: var(--text-secondary);">
+            Update maximum redemptions for key <strong id="modal-edit-key-code" style="color: #fff; font-family: var(--font-mono);"></strong>:
+          </p>
+          <div class="key-gen-field">
+            <label class="field-label">Allowed Times Usable</label>
+            <input type="number" id="modal-edit-uses-input" class="admin-input-sm" min="1" max="999999" value="1">
+            <div class="uses-preset-row" style="margin-top: 8px;">
+              <button type="button" class="preset-use-btn" onclick="document.getElementById('modal-edit-uses-input').value = '1'">1 Use</button>
+              <button type="button" class="preset-use-btn" onclick="document.getElementById('modal-edit-uses-input').value = '5'">5 Uses</button>
+              <button type="button" class="preset-use-btn" onclick="document.getElementById('modal-edit-uses-input').value = '10'">10 Uses</button>
+              <button type="button" class="preset-use-btn" onclick="document.getElementById('modal-edit-uses-input').value = '999999'">Unlimited (∞)</button>
+            </div>
+          </div>
+          <div style="display: flex; gap: 10px; justify-content: flex-end; margin-top: 8px;">
+            <button type="button" class="admin-action-btn" id="modal-cancel-edit-btn">Cancel</button>
+            <button type="button" class="primary-btn" id="modal-save-uses-btn" style="padding: 8px 18px; font-size: 12px;">
+              SAVE LIMIT
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
 
     <!-- Footer -->
     <footer class="a4ku-footer">
